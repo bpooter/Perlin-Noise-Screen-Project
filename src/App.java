@@ -1,75 +1,136 @@
-import javafx.animation.Animation;
+import javafx.animation.AnimationTimer;
 import javafx.animation.PauseTransition;
-import javafx.animation.RotateTransition;
 import javafx.application.Application;
 import javafx.scene.*;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.PhongMaterial;
 import javafx.scene.shape.*;
-import javafx.scene.transform.Rotate;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-
-import java.awt.event.KeyEvent;
-import java.awt.event.MouseEvent;
 
 public class App extends Application {
 
     private boolean readyToExit = false;
+    private static final int SIZE = 35;
+    private static final float SCALE = 40;
 
     @Override
     public void start(Stage stage) throws Exception {
 
-        Box cube = new Box(100,100,100);
-        PhongMaterial material = new PhongMaterial();
-        material.setDiffuseColor(Color.DARKGRAY);
-        material.setSpecularColor(Color.WHEAT);
-        cube.setMaterial(material);
+        double offsetX = (SIZE * SCALE) / 2.0;
+        double offsetZ = (SIZE * SCALE) / 2.0;
 
         TriangleMesh triangleMesh = new TriangleMesh(VertexFormat.POINT_TEXCOORD);
-        float[] points = {
-                0.0f,0.0f,0.0f,
-                100.0f,0.0f,0.0f,
-                0.0f,100.0f,0.0f
+
+        FastNoiseLite noise = new FastNoiseLite();
+        noise.SetNoiseType(FastNoiseLite.NoiseType.Perlin);
+        noise.SetFrequency(0.1f);
+        noise.SetFractalType(FastNoiseLite.FractalType.FBm);
+        noise.SetFractalOctaves(4);
+        noise.SetFractalLacunarity(2.0f);
+        noise.SetFractalGain(0.5f);
+
+        float noiseScale = 0.5f;
+        float heightScale = 250f;
+
+        float scrollSpeed = 0.025f;
+        final float[] scrollOffset = {0f};
+
+        int roadWidth = 3;
+        int roadStart = (SIZE / 2) - (roadWidth / 2);
+        int roadEnd = roadStart + roadWidth;
+
+        AnimationTimer timer = new AnimationTimer() {
+            @Override
+            public void handle(long l) {
+                scrollOffset[0] += scrollSpeed;
+
+                triangleMesh.getPoints().clear();
+
+                //adding points
+                for (int y = 0; y <= SIZE; y++) {
+                    for (int x = 0; x <= SIZE; x++) {
+                        float xPoint = (float)(x * SCALE - offsetX);
+                        float zPoint = (float)(y * SCALE - offsetZ);
+
+                        float noiseValue = noise.GetNoise(x * noiseScale, (y + scrollOffset[0]) * noiseScale);
+
+                        float yPoint;
+                        if (x>= roadStart && x < roadEnd){
+                            yPoint = 15f;
+                        } else {
+                            yPoint = Math.signum(noiseValue) * (float)Math.pow(Math.abs(noiseValue), 1.5) * heightScale;
+                        }
+
+                        triangleMesh.getPoints().addAll(xPoint, yPoint, zPoint);
+                    }
+                }
+            }
         };
+        timer.start();
 
-        triangleMesh.getPoints().addAll(points);
 
-        float[] texCoords = { 0.0f,0.0f };
+        triangleMesh.getTexCoords().addAll(0,0);
 
-        triangleMesh.getTexCoords().addAll(texCoords);
+        for (int y=0; y<SIZE; y++){
+            for (int x=0; x<SIZE; x++){
+                int p0 = y * (SIZE + 1) + x;
+                int p1 = p0 + 1;
+                int p2 = p0 + (SIZE + 1);
+                int p3 = p2 + 1;
 
-        int[] faces = {
-                0,0,1,0,2,0
-        };
+                triangleMesh.getFaces().addAll(p0, 0, p2, 0, p1, 0);
+                triangleMesh.getFaces().addAll(p1, 0, p2, 0, p3, 0);
+            }
+        }
 
-        triangleMesh.getFaces().addAll(faces);
+        PhongMaterial filledMaterial = new PhongMaterial();
+        PhongMaterial lineMaterial = new PhongMaterial();
+
+        filledMaterial.setDiffuseColor(Color.CYAN);
+        filledMaterial.setSpecularColor(Color.TRANSPARENT);
+
+        lineMaterial.setDiffuseColor(Color.BLACK);
 
         MeshView meshView = new MeshView(triangleMesh);
-        meshView.setMaterial(material);
+        MeshView filledMesh = new MeshView(triangleMesh);
+        filledMesh.setDrawMode(DrawMode.FILL);
+        filledMesh.setMaterial(filledMaterial);
+        meshView.setMaterial(lineMaterial);
+
+
+        meshView.setDrawMode(DrawMode.LINE);
 
         meshView.setCullFace(CullFace.NONE);
-        meshView.setTranslateX(-50);  // Center it (optional)
-        meshView.setTranslateY(-50);
-        meshView.setTranslateZ(0);    // Keep it at origin, in front of camera
+        filledMesh.setCullFace(CullFace.NONE);
 
-        Group root = new Group(meshView);
+        Group root = new Group(filledMesh,meshView);
 
         // Add some lights!
         AmbientLight ambient = new AmbientLight(Color.rgb(100, 100, 100));
         PointLight light = new PointLight(Color.WHITE);
-        light.setTranslateX(150);
-        light.setTranslateY(-100);
-        light.setTranslateZ(-300);
+        light.setTranslateX(0);
+        light.setTranslateY(0);
+        light.setTranslateZ(0);
 
         root.getChildren().addAll(ambient, light);
 
+        Scene scene = new Scene(root, 800,600, true);
+
         PerspectiveCamera camera = new PerspectiveCamera(true);
-        camera.setTranslateZ(-600);
+
+        double meshWidth = SIZE * SCALE;
+        double aspect = scene.getWidth() / scene.getHeight();
+        double verticalFOV = Math.toRadians(camera.getFieldOfView());
+        double horizontalFOV = 2 * Math.atan(Math.tan(verticalFOV / 2) * aspect);
+        double requiredDistance = (meshWidth / 2.0) / Math.tan(horizontalFOV / 1.65);
+
+        // Set camera at a distance so it sees the whole mesh horizontally
+        camera.setTranslateZ(offsetZ - requiredDistance);
+        camera.setTranslateY(-50);
+        camera.setTranslateX(0);
         camera.setNearClip(0.1);
         camera.setFarClip(2000.0);
-
-        Scene scene = new Scene(root, 800,600, true);
         scene.setCamera(camera);
 
         PauseTransition delay = new PauseTransition(Duration.seconds(1));
@@ -95,14 +156,9 @@ public class App extends Application {
 
         stage.show();
 
-        //setting the rotation to rotate along the y axis.
-        RotateTransition rotateY = new RotateTransition(Duration.seconds(10), cube);
-        rotateY.setAxis(Rotate.Y_AXIS);
-        rotateY.setByAngle(360);
-        rotateY.setCycleCount(Animation.INDEFINITE);
-        rotateY.play();
-
     }
+
+
 
     public static void main(String[] args) {
         launch();
